@@ -431,6 +431,45 @@ class GDF(object):
         ax.set_xlim(T[0], T[1])
         ax.set_ylim(neurons.min(), neurons.max())
         ax.set_title('database content on T = [%.0f, %.0f]' % (T[0], T[1]))
+        
+class DAT(GDF):
+    def _blockread(self, fname,skiprows=3):
+        """
+        Generator yields bsize lines from gdf file.
+        Hidden method.
+
+
+        Parameters
+        ----------
+        fname : str
+            Name of gdf-file.
+
+
+        Yields
+        ------
+        list
+            file contents
+
+        """
+        a = []
+        with open(fname, 'r') as f:
+            while True:
+                for i in range(3):
+                    line = f.readline()
+                    if not line:
+                        break
+                if not line:
+                    break
+                for i in range(self.bsize):
+                    line = f.readline()
+                    if not line:
+                        break
+                    a.append(line.split())
+                yield a
+        if a == []:
+            raise Exception('stop file')
+
+
 
 
 def test1():

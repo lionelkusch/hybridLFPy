@@ -10,7 +10,7 @@ from glob import glob
 if 'DISPLAY' not in os.environ:
     import matplotlib
     matplotlib.use('Agg')
-from .gdf import GDF
+from .gdf import GDF,DAT
 import matplotlib.pyplot as plt
 import h5py
 from mpi4py import MPI
@@ -207,8 +207,12 @@ class CachedNetwork(object):
             self.dbs = {}
 
         for X in self.X:
-            db = GDF(os.path.join(self.dbname),
-                     debug=True, new_db=True)
+            if self.ext == 'gdf':
+                db = GDF(os.path.join(self.dbname),
+                    debug=True, new_db=True)
+            elif self.ext == 'dat':
+                db = DAT(os.path.join(self.dbname),
+                    debug=True, new_db=True)
             db.create(re=os.path.join(self.spike_output_path,
                                       '{0}*{1}*{2}'.format(self.label, X,
                                                            self.ext)),
