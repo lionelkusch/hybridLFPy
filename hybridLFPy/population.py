@@ -5,6 +5,8 @@ Class methods defining multicompartment neuron populations in the hybrid scheme
 """
 import os
 # import glob
+import sys
+
 import numpy as np
 import h5py
 import matplotlib.pyplot as plt
@@ -283,6 +285,7 @@ class PopulationSuper(object):
 
         """
         for cellindex in self.RANK_CELLINDICES:
+            print('rank', RANK, 'cell :', cellindex); sys.stdout.flush()
             self.cellsim(cellindex)
 
         COMM.Barrier()
