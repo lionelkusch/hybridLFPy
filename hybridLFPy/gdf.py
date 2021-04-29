@@ -165,13 +165,12 @@ class GDF(object):
                 except RuntimeError:
                     break
             else:
-                while True:
-                    try:
-                        for data in self._blockread(f, skiprows):
-                            self.cursor.executemany('INSERT INTO spikes VALUES (?, ?)', data)
-                            self.conn.commit()
-                    except RuntimeError:
-                        break
+                try:
+                    for data in self._blockread(f, skiprows):
+                        self.cursor.executemany('INSERT INTO spikes VALUES (?, ?)', data)
+                        self.conn.commit()
+                except RuntimeError:
+                    break
 
         toc = now()
         if self.debug: print('Inserts took %g seconds.' % (toc-tic))
