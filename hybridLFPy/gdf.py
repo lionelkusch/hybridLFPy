@@ -461,10 +461,12 @@ class DAT(GDF):
                 if not line:
                     break
                 for i in range(self.bsize):
+                    print('line ',i)
                     line = f.readline()
                     if not line:
                         break
                     a.append(line.split())
+                if self.debug: print(a); sys.stdout.flush()
                 yield a
         if a == []:
             raise Exception('stop file')
