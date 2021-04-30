@@ -375,7 +375,7 @@ class PopulationSuper(object):
             cell.__del__()
 
             print('cell %s population %s in %.2f s' % (cellindex, self.y,
-                                                       time() - tic))
+                                                       time() - tic)); sys.stdout.flush()
 
     def set_pop_soma_pos(self):
         """
