@@ -453,7 +453,7 @@ class DAT(GDF):
         a = []
         with open(fname, 'r') as f:
             while True:
-                for i in range(3):
+                for i in range(skiprows):
                     line = f.readline()
                     if not line:
                         break
