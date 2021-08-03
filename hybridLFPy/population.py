@@ -223,10 +223,10 @@ class PopulationSuper(object):
         self.alphas = np.ones(self.POPULATION_SIZE)
 
         self._set_up_savefolder()
-        self.output_file_rank_name = 'rank_{}.h5'
-        self.cell_name_group='cell_{}'
+        self.output_file_rank_name = 'rank_{}_'+str(self.y)+'.h5'
+        self.cell_name_group = 'cell_{}'
         self.output_file_rank = h5py.File(os.path.join(self.tmp_path,
-                                               self.output_file_rank_name.format(RANK)), 'w')
+                                                       self.output_file_rank_name.format(RANK)), 'w')
 
         self.pop_soma_pos = self.set_pop_soma_pos()
         self.rotations = self.set_rotations()
@@ -645,27 +645,21 @@ class PopulationSuper(object):
         # broadcast output shape from RANK 0 data which is guarantied to exist
         if RANK == 0:
             tmp_files = []
-            rank_cell_indices = []
             for rank in range(SIZE):
                 tmp_files.append(h5py.File(os.path.join(self.tmp_path,
-                                               self.output_file_rank_name.format(rank),'r')))
-                rank_cell_indices.append(self.CELLINDICES[self.CELLINDICES % SIZE == rank ])
-            shape = (np.shape(
-                tmp_files[0][self.cell_name_group.format(self.RANK_CELLINDICES[0])][measure]),)
-            data = np.zeros(shape)
+                                               self.output_file_rank_name.format(rank)), 'r'))
+            shape = np.shape(
+                tmp_files[0][self.cell_name_group.format(self.RANK_CELLINDICES[0])][measure])
+            data = np.zeros(shape, dtype=np.float32)
 
             # compute the total LFP of cells on this RANK
-            for rank in range(SIZE):
-                if rank_cell_indices[rank].size > 0:
-                    for cellindex in rank_cell_indices:
-                        data += tmp_files[rank][self.cell_name_group.format(cellindex)][measure]
-                else:
-                    data = np.zeros(shape, dtype=np.float32)
+            for cellindex in range(self.POPULATION_SIZE):
+                data += tmp_files[cellindex % SIZE][self.cell_name_group.format(cellindex)][measure]
 
             if save:
                 fname = os.path.join(self.populations_path,
-                                 self.output_file.format(self.y,
-                                                         measure) + '.h5')
+                                     self.output_file.format(self.y,
+                                                             measure) + '.h5')
                 f = h5py.File(fname, 'w')
                 f['srate'] = 1E3 / self.dt_output
                 f.create_dataset('data', data=data, compression=4)
@@ -718,7 +712,7 @@ class PopulationSuper(object):
                     rank_cell_indices = []
                     for rank in range(SIZE):
                         tmp_files.append(h5py.File(os.path.join(self.tmp_path,
-                                                                self.output_file_rank_name.format(rank), 'r')))
+                                                                self.output_file_rank_name.format(rank)), 'r'))
                         rank_cell_indices.append(self.CELLINDICES[self.CELLINDICES % SIZE == rank])
                 else:
                     SAMPLESIZE = int(self.recordSingleContribFrac *
@@ -727,13 +721,12 @@ class PopulationSuper(object):
                     rank_cell_indices = []
                     for rank in range(SIZE):
                         tmp_files.append(h5py.File(os.path.join(self.tmp_path,
-                                                                self.output_file_rank_name.format(rank), 'r')))
+                                                                self.output_file_rank_name.format(rank)), 'r'))
                         ids = self.CELLINDICES[self.CELLINDICES % SIZE == rank]
                         rank_cell_indices.append(self.CELLINDICES[ids[ids < SAMPLESIZE]])
-                shape = (SAMPLESIZE,
-                                 ) + np.shape(
+                shape = (SAMPLESIZE,) + np.shape(
                             tmp_files[0][self.cell_name_group.format(self.RANK_CELLINDICES[0])][measure])
-                data = np.zeros(shape,dt=np.float32)
+                data = np.zeros(shape, dtype=np.float32)
                 for rank in range(SIZE):
                     if rank_cell_indices[rank].size > 0:
                         for cellindex in rank_cell_indices[rank]:
@@ -765,17 +758,16 @@ class PopulationSuper(object):
             rank_cell_indices = []
             for rank in range(SIZE):
                 tmp_files.append(h5py.File(os.path.join(self.tmp_path,
-                                               self.output_file_rank_name.format(rank),'r')))
-                rank_cell_indices.append(self.CELLINDICES[self.CELLINDICES % SIZE == rank ])
+                                                        self.output_file_rank_name.format(rank)), 'r'))
+                rank_cell_indices.append(self.CELLINDICES[self.CELLINDICES % SIZE == rank])
             for measure in self.savelist:
-                shape = (self.POPULATION_SIZE,
-                             ) + np.shape(
+                shape = (self.POPULATION_SIZE,) + np.shape(
                         tmp_files[0][self.cell_name_group.format(self.RANK_CELLINDICES[0])][measure])
                 data = np.zeros(shape)
                 for rank in range(SIZE):
                     # first get size of the data
                     if rank_cell_indices[rank].size > 0:
-                        for ind in rank_cell_indices:
+                        for ind in rank_cell_indices[rank]:
                             data[ind] = tmp_files[rank][self.cell_name_group.format(ind)][measure]
                 f[measure] = data
             for file in tmp_files:
@@ -1298,21 +1290,27 @@ class Population(PopulationSuper):
                 probe.cell = None
 
             # put all necessary cell output in output dict
+            tmp_data = {}
             for attrbt in self.savelist:
                 attr = getattr(cell, attrbt)
                 if isinstance(attr, np.ndarray):
-                    self.output[cellindex][attrbt] = attr.astype('float32')
+                    tmp_data[attrbt] = attr.astype('float32')
                 else:
                     try:
-                        self.output[cellindex][attrbt] = attr
+                        tmp_data[attrbt] = attr
                     except BaseException:
-                        self.output[cellindex][attrbt] = str(attr)
-                self.output[cellindex]['srate'] = 1E3 / self.dt_output
+                        tmp_data[attrbt] = str(attr)
+                tmp_data['srate'] = 1E3 / self.dt_output
 
             # collect probe output
             for probe in self.probes:
-                self.output[cellindex][probe.__class__.__name__] = \
+                tmp_data[probe.__class__.__name__] = \
                     probe.data.copy()
+
+            # save data in temporally file
+            grp = self.output_file_rank.create_group(self.cell_name_group.format(cellindex))
+            for key, value in tmp_data.items():
+                grp.create_dataset(key, data=value)
 
             # clean up hoc namespace
             cell.__del__()

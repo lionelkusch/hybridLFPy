@@ -432,7 +432,7 @@ class GDF(object):
         ax.set_title('database content on T = [%.0f, %.0f]' % (T[0], T[1]))
         
 class DAT(GDF):
-    def _blockread(self, fname,skiprows=3):
+    def _blockread(self, fname,skiprows=0,skiphead=3):
         """
         Generator yields bsize lines from gdf file.
         Hidden method.
@@ -454,7 +454,7 @@ class DAT(GDF):
         with open(fname, 'r') as f:
             while True:
                 line = None
-                for i in range(skiprows):
+                for i in range(skiprows+skiphead):
                     line = f.readline()
                     if not line:
                         break
@@ -467,8 +467,7 @@ class DAT(GDF):
                     a.append(line.split())
                 yield a
         if a == []:
-            raise StopIteration
-            # raise Exception('stop file')
+            raise Exception('stop file')
 
 
 
