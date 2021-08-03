@@ -112,6 +112,7 @@ class PopulationSuper(object):
                  probes=[],
                  savelist=['somapos'],
                  savefolder='simulation_output_example_brunel',
+                 save_in_file=False,
                  dt_output=1.,
                  recordSingleContribFrac=0,
                  POPULATIONSEED=123456,
@@ -151,6 +152,8 @@ class PopulationSuper(object):
             `LFPy.Cell` attributes to save for each single-cell simulation.
         savefolder : str
             path to where simulation results are stored.
+        save_in_file : boolean
+            check if the result is save in file or not
         recordSingleContribFrac : float
             fraction  in [0, 1] of individual neurons in population which
             output will be stored
@@ -184,6 +187,7 @@ class PopulationSuper(object):
         self.probes = probes
         self.savelist = savelist
         self.savefolder = savefolder
+        self.save_in_file = save_in_file
         self.dt_output = dt_output
         self.recordSingleContribFrac = recordSingleContribFrac
         self.output_file = output_file
@@ -219,6 +223,10 @@ class PopulationSuper(object):
         self.alphas = np.ones(self.POPULATION_SIZE)
 
         self._set_up_savefolder()
+        self.output_file_rank_name = 'rank_{}.h5'
+        self.cell_name_group='cell_{}'
+        self.output_file_rank = h5py.File(os.path.join(self.tmp_path,
+                                               self.output_file_rank_name.format(RANK)), 'w')
 
         self.pop_soma_pos = self.set_pop_soma_pos()
         self.rotations = self.set_rotations()
@@ -227,8 +235,6 @@ class PopulationSuper(object):
         self.RANK_CELLINDICES = self.CELLINDICES[self.CELLINDICES % SIZE
                                                  == RANK]
 
-        # container for single-cell output generated on this RANK
-        self.output = dict((i, {}) for i in self.RANK_CELLINDICES)
 
     def _set_up_savefolder(self):
         """
@@ -265,6 +271,11 @@ class PopulationSuper(object):
             if not os.path.isdir(self.populations_path):
                 os.mkdir(self.populations_path)
 
+        self.tmp_path = os.path.join(self.savefolder, 'tmp')
+        if RANK == 0:
+            if not os.path.isdir(self.tmp_path):
+                os.mkdir(self.tmp_path)
+
         COMM.Barrier()
 
     def run(self):
@@ -288,6 +299,9 @@ class PopulationSuper(object):
             self.cellsim(cellindex)
             sys.stdout.flush()
 
+        self.output_file_rank.close()
+        COMM.Barrier()
+        self.collect_data()
         COMM.Barrier()
 
     def cellsim(self, cellindex, return_just_cell=False):
@@ -356,21 +370,27 @@ class PopulationSuper(object):
                 probe.cell = None
 
             # put all necessary cell output in output dict
+            tmp_data = {}
             for attrbt in self.savelist:
                 attr = getattr(cell, attrbt)
                 if isinstance(attr, np.ndarray):
-                    self.output[cellindex][attrbt] = attr.astype('float32')
+                    tmp_data[attrbt] = attr.astype('float32')
                 else:
                     try:
-                        self.output[cellindex][attrbt] = attr
+                        tmp_data[attrbt] = attr
                     except BaseException:
-                        self.output[cellindex][attrbt] = str(attr)
-                self.output[cellindex]['srate'] = 1E3 / self.dt_output
+                        tmp_data[attrbt] = str(attr)
+                tmp_data['srate'] = 1E3 / self.dt_output
 
             # collect probe output
             for probe in self.probes:
-                self.output[cellindex][probe.__class__.__name__] = \
+                tmp_data[probe.__class__.__name__] = \
                     probe.data.copy()
+
+            # save data in temporally file
+            grp = self.output_file_rank.create_group(self.cell_name_group.format(cellindex))
+            for key, value in tmp_data.items():
+                grp.create_dataset(key, data=value)
 
             # clean up hoc namespace
             cell.__del__()
@@ -406,20 +426,21 @@ class PopulationSuper(object):
             pop_soma_pos = self.draw_rand_pos(
                 # min_r = self.electrodeParams['r_z'],
                 **self.populationParams)
-            # save the somatic placements:
-            pop_soma_pos_format = np.zeros((self.POPULATION_SIZE, 3))
-            keys = ['x', 'y', 'z']
-            for i in range(self.POPULATION_SIZE):
-                for j in range(3):
-                    pop_soma_pos_format[i, j] = pop_soma_pos[i][keys[j]]
-            fname = os.path.join(
-                self.populations_path,
-                self.output_file.format(
-                    self.y,
-                    'somapos.gdf'))
-            np.savetxt(fname, pop_soma_pos_format)
-            assert (os.path.isfile(fname))
-            print('save somapos ok')
+            if self.save_in_file:
+                # save the somatic placements:
+                pop_soma_pos_format = np.zeros((self.POPULATION_SIZE, 3))
+                keys = ['x', 'y', 'z']
+                for i in range(self.POPULATION_SIZE):
+                    for j in range(3):
+                        pop_soma_pos_format[i, j] = pop_soma_pos[i][keys[j]]
+                fname = os.path.join(
+                    self.populations_path,
+                    self.output_file.format(
+                        self.y,
+                        'somapos.gdf'))
+                np.savetxt(fname, pop_soma_pos_format)
+                assert (os.path.isfile(fname))
+                print('save somapos ok')
         else:
             pop_soma_pos = None
 
@@ -457,23 +478,25 @@ class PopulationSuper(object):
                 for axis in self.rand_rot_axis:
                     defaultrot.update({axis: np.random.rand() * 2 * np.pi})
                 rotations.append(defaultrot)
-            # save rotations using hdf5
-            fname = os.path.join(
-                self.populations_path,
-                self.output_file.format(
-                    self.y,
-                    'rotations.h5'))
-            f = h5py.File(fname, 'w')
-            f.create_dataset('x', (len(rotations),))
-            f.create_dataset('y', (len(rotations),))
-            f.create_dataset('z', (len(rotations),))
 
-            for i, rot in enumerate(rotations):
-                for key, value in list(rot.items()):
-                    f[key][i] = value
-            f.close()
-            assert(os.path.isfile(fname))
-            print('save rotations ok')
+            if self.save_in_file:
+                # save rotations using hdf5
+                fname = os.path.join(
+                    self.populations_path,
+                    self.output_file.format(
+                        self.y,
+                        'rotations.h5'))
+                f = h5py.File(fname, 'w')
+                f.create_dataset('x', (len(rotations),))
+                f.create_dataset('y', (len(rotations),))
+                f.create_dataset('z', (len(rotations),))
+
+                for i, rot in enumerate(rotations):
+                    for key, value in list(rot.items()):
+                        f[key][i] = value
+                f.close()
+                assert(os.path.isfile(fname))
+                print('save rotations ok')
         else:
             rotations = None
 
@@ -602,7 +625,7 @@ class PopulationSuper(object):
 
         return soma_pos
 
-    def calc_signal_sum(self, measure='LFP'):
+    def calc_signal_sum(self, measure='LFP', save=False):
         """
         Superimpose each cell's contribution to the compound population signal,
         i.e., the population CSD or LFP or some other lfpykit.<instance>
@@ -610,6 +633,8 @@ class PopulationSuper(object):
         Parameters
         ----------
         measure : str
+        save : boolean
+            save the result in file or not
 
         Returns
         -------
@@ -619,33 +644,40 @@ class PopulationSuper(object):
         """
         # broadcast output shape from RANK 0 data which is guarantied to exist
         if RANK == 0:
-            shape = self.output[self.RANK_CELLINDICES[0]][measure].shape
-        else:
-            shape = None
-        shape = COMM.bcast(shape, root=0)
+            tmp_files = []
+            rank_cell_indices = []
+            for rank in range(SIZE):
+                tmp_files.append(h5py.File(os.path.join(self.tmp_path,
+                                               self.output_file_rank_name.format(rank),'r')))
+                rank_cell_indices.append(self.CELLINDICES[self.CELLINDICES % SIZE == rank ])
+            shape = (np.shape(
+                tmp_files[0][self.cell_name_group.format(self.RANK_CELLINDICES[0])][measure]),)
+            data = np.zeros(shape)
 
-        # compute the total LFP of cells on this RANK
-        if self.RANK_CELLINDICES.size > 0:
-            for i, cellindex in enumerate(self.RANK_CELLINDICES):
-                if i == 0:
-                    data = self.output[cellindex][measure]
+            # compute the total LFP of cells on this RANK
+            for rank in range(SIZE):
+                if rank_cell_indices[rank].size > 0:
+                    for cellindex in rank_cell_indices:
+                        data += tmp_files[rank][self.cell_name_group.format(cellindex)][measure]
                 else:
-                    data += self.output[cellindex][measure]
+                    data = np.zeros(shape, dtype=np.float32)
+
+            if save:
+                fname = os.path.join(self.populations_path,
+                                 self.output_file.format(self.y,
+                                                         measure) + '.h5')
+                f = h5py.File(fname, 'w')
+                f['srate'] = 1E3 / self.dt_output
+                f.create_dataset('data', data=data, compression=4)
+                f.close()
+                print('save {} ok'.format(measure))
+            for file in tmp_files:
+                file.close()
+            return data
         else:
-            data = np.zeros(shape, dtype=np.float32)
+            return None
 
-        # container for full LFP on RANK 0
-        if RANK == 0:
-            DATA = np.zeros_like(data, dtype=np.float32)
-        else:
-            DATA = None
-
-        # sum to RANK 0 using automatic type discovery with MPI
-        COMM.Reduce(data, DATA, op=MPI.SUM, root=0)
-
-        return DATA
-
-    def collectSingleContribs(self, measure='LFP'):
+    def collectSingleContribs(self, measure='LFP', save=False):
         """
         Collect single cell data and save them to HDF5 file.
         The function will also return signals generated by all cells
@@ -655,6 +687,8 @@ class PopulationSuper(object):
         ----------
         measure : str
             Either 'LFP', 'CSD' or 'current_dipole_moment'
+        save : boolean
+            Save the result in file or not
 
 
         Returns
@@ -664,117 +698,91 @@ class PopulationSuper(object):
             index
 
         """
-        try:
-            assert(self.recordSingleContribFrac <= 1 and
-                   self.recordSingleContribFrac >= 0)
-        except AssertionError:
-            raise AssertionError(
-                'recordSingleContribFrac {} not in [0, 1]'.format(
-                    self.recordSingleContribFrac))
+        if RANK == 0:
+            try:
+                assert(self.recordSingleContribFrac <= 1 and
+                       self.recordSingleContribFrac >= 0)
+            except AssertionError:
+                raise AssertionError(
+                    'recordSingleContribFrac {} not in [0, 1]'.format(
+                        self.recordSingleContribFrac))
 
-        if not self.recordSingleContribFrac:
-            return
-        else:
-            # reconstruct RANK_CELLINDICES of all RANKs for controlling
-            # communication
-            if self.recordSingleContribFrac == 1.:
-                SAMPLESIZE = self.POPULATION_SIZE
-                RANK_CELLINDICES = []
-                for i in range(SIZE):
-                    RANK_CELLINDICES += [self.CELLINDICES[
-                        self.CELLINDICES % SIZE == i]]
+            if not self.recordSingleContribFrac:
+                return
             else:
-                SAMPLESIZE = int(self.recordSingleContribFrac *
-                                 self.POPULATION_SIZE)
-                RANK_CELLINDICES = []
-                for i in range(SIZE):
-                    ids = self.CELLINDICES[self.CELLINDICES % SIZE == i]
-                    RANK_CELLINDICES += [ids[ids < SAMPLESIZE]]
-
-            # gather data on this RANK
-            if RANK_CELLINDICES[RANK].size > 0:
-                for i, cellindex in enumerate(RANK_CELLINDICES[RANK]):
-                    if i == 0:
-                        data_temp = np.zeros([RANK_CELLINDICES[RANK].size] +
-                                             [self.output[cellindex
-                                                          ][measure].shape],
-                                             dtype=np.float32)
-                    data_temp[i, ] = self.output[cellindex][measure]
-
-            if RANK == 0:
-                # container of all output
-                data = np.zeros([SAMPLESIZE] +
-                                list(self.output[cellindex][measure].shape),
-                                dtype=np.float32)
-
-                # fill in values from this RANK
-                if RANK_CELLINDICES[0].size > 0:
-                    for j, k in enumerate(RANK_CELLINDICES[0]):
-                        data[k, ] = data_temp[j, ]
-
-                # iterate over all other RANKs
-                for i in range(1, len(RANK_CELLINDICES)):
-                    if RANK_CELLINDICES[i].size > 0:
-                        # receive on RANK 0 from all other RANK
-                        data_temp = np.zeros([RANK_CELLINDICES[i].size] +
-                                             [self.output[cellindex
-                                                          ][measure].shape],
-                                             dtype=np.float32)
-                        COMM.Recv([data_temp, MPI.FLOAT], source=i, tag=13)
-
-                        # fill in values
-                        for j, k in enumerate(RANK_CELLINDICES[i]):
-                            data[k, ] = data_temp[j, ]
-            else:
-                data = None
-                if RANK_CELLINDICES[RANK].size > 0:
-                    # send to RANK 0
-                    COMM.Send([data_temp, MPI.FLOAT], dest=0, tag=13)
-
-            if RANK == 0:
-                # save all single-cell data to file
-                fname = os.path.join(self.populations_path,
-                                     '%s_%ss.h5' % (self.y, measure))
-                f = h5py.File(fname, 'w')
-                f.create_dataset('data', data=data, compression=4)
-                f['srate'] = 1E3 / self.dt_output
-                f.close()
-                assert(os.path.isfile(fname))
+                # reconstruct RANK_CELLINDICES of all RANKs for controlling
+                # communication
+                if self.recordSingleContribFrac == 1.:
+                    SAMPLESIZE = self.POPULATION_SIZE
+                    tmp_files = []
+                    rank_cell_indices = []
+                    for rank in range(SIZE):
+                        tmp_files.append(h5py.File(os.path.join(self.tmp_path,
+                                                                self.output_file_rank_name.format(rank), 'r')))
+                        rank_cell_indices.append(self.CELLINDICES[self.CELLINDICES % SIZE == rank])
+                else:
+                    SAMPLESIZE = int(self.recordSingleContribFrac *
+                                     self.POPULATION_SIZE)
+                    tmp_files = []
+                    rank_cell_indices = []
+                    for rank in range(SIZE):
+                        tmp_files.append(h5py.File(os.path.join(self.tmp_path,
+                                                                self.output_file_rank_name.format(rank), 'r')))
+                        ids = self.CELLINDICES[self.CELLINDICES % SIZE == rank]
+                        rank_cell_indices.append(self.CELLINDICES[ids[ids < SAMPLESIZE]])
+                shape = (SAMPLESIZE,
+                                 ) + np.shape(
+                            tmp_files[0][self.cell_name_group.format(self.RANK_CELLINDICES[0])][measure])
+                data = np.zeros(shape,dt=np.float32)
+                for rank in range(SIZE):
+                    if rank_cell_indices[rank].size > 0:
+                        for cellindex in rank_cell_indices[rank]:
+                            data[cellindex, ] = tmp_files[rank][self.cell_name_group.format(cellindex)][measure]
+                if save:
+                    # save all single-cell data to file
+                    fname = os.path.join(self.populations_path,
+                                         '%s_%ss.h5' % (self.y, measure))
+                    f = h5py.File(fname, 'w')
+                    f.create_dataset('data', data=data, compression=4)
+                    f['srate'] = 1E3 / self.dt_output
+                    f.close()
+                    assert(os.path.isfile(fname))
+                for file in tmp_files:
+                    file.close()
 
                 print('file %s_%ss.h5 ok' % (self.y, measure))
-
-            COMM.Barrier()
-
             return data
+        else:
+            return None
 
     def collect_savelist(self):
         '''collect cell attribute data to RANK 0 before dumping data to file'''
+
         if RANK == 0:
             f = h5py.File(os.path.join(self.populations_path,
                                        '{}_savelist.h5'.format(self.y)), 'w')
-        for measure in self.savelist:
-            if self.RANK_CELLINDICES.size > 0:
+            tmp_files = []
+            rank_cell_indices = []
+            for rank in range(SIZE):
+                tmp_files.append(h5py.File(os.path.join(self.tmp_path,
+                                               self.output_file_rank_name.format(rank),'r')))
+                rank_cell_indices.append(self.CELLINDICES[self.CELLINDICES % SIZE == rank ])
+            for measure in self.savelist:
                 shape = (self.POPULATION_SIZE,
-                         ) + np.shape(
-                    self.output[self.RANK_CELLINDICES[0]][measure])
+                             ) + np.shape(
+                        tmp_files[0][self.cell_name_group.format(self.RANK_CELLINDICES[0])][measure])
                 data = np.zeros(shape)
-                for ind in self.RANK_CELLINDICES:
-                    data[ind] = self.output[ind][measure]
-            else:
-                data = None
-
-            # sum data arrays to RANK 0
-            if RANK == 0:
-                DATA = np.zeros_like(data)
-            else:
-                DATA = None
-            COMM.Reduce(data, DATA, op=MPI.SUM, root=0)
-
-            if RANK == 0:
-                f[measure] = DATA
-
-        if RANK == 0:
+                for rank in range(SIZE):
+                    # first get size of the data
+                    if rank_cell_indices[rank].size > 0:
+                        for ind in rank_cell_indices:
+                            data[ind] = tmp_files[rank][self.cell_name_group.format(ind)][measure]
+                f[measure] = data
+            for file in tmp_files:
+                file.close()
             f.close()
+        else:
+            pass
 
     def collect_data(self):
         """
@@ -796,32 +804,18 @@ class PopulationSuper(object):
         # to files
         self.collect_savelist()
 
+        # collect cell attributes in self.savelist
+        for attr in self.savelist:
+            self.collectSingleContribs(attr, save=self.save_in_file)
+
         # collect probe measurements
         for probe in self.probes:
-            self.collectSingleContribs(probe.__class__.__name__)
+            self.collectSingleContribs(probe.__class__.__name__, save=self.save_in_file)
 
         # sum up single-cell predictions per probe and save
         for probe in self.probes:
             measure = probe.__class__.__name__
-            data = self.calc_signal_sum(measure=measure)
-
-            if RANK == 0:
-                fname = os.path.join(self.populations_path,
-                                     self.output_file.format(self.y,
-                                                             measure) + '.h5')
-                f = h5py.File(fname, 'w')
-                f['srate'] = 1E3 / self.dt_output
-                f.create_dataset('data', data=data, compression=4)
-                f.close()
-                print('save {} ok'.format(measure))
-
-
-        # collect cell attributes in self.savelist
-        for attr in self.savelist:
-            self.collectSingleContribs(attr)
-
-        # resync threads
-        COMM.Barrier()
+            self.calc_signal_sum(measure=measure, save=self.save_in_file)
 
 
 class Population(PopulationSuper):

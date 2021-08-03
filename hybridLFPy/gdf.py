@@ -453,6 +453,7 @@ class DAT(GDF):
         a = []
         with open(fname, 'r') as f:
             while True:
+                line = None
                 for i in range(skiprows):
                     line = f.readline()
                     if not line:
@@ -466,7 +467,8 @@ class DAT(GDF):
                     a.append(line.split())
                 yield a
         if a == []:
-            raise Exception('stop file')
+            raise StopIteration
+            # raise Exception('stop file')
 
 
 
