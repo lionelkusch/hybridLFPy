@@ -218,10 +218,10 @@ class PopulationSuper(object):
 
         self.alphas = np.ones(self.POPULATION_SIZE)
 
+        self._set_up_savefolder()
+
         self.pop_soma_pos = self.set_pop_soma_pos()
         self.rotations = self.set_rotations()
-
-        self._set_up_savefolder()
 
         self.CELLINDICES = np.arange(self.POPULATION_SIZE)
         self.RANK_CELLINDICES = self.CELLINDICES[self.CELLINDICES % SIZE
@@ -286,6 +286,7 @@ class PopulationSuper(object):
         """
         for cellindex in self.RANK_CELLINDICES:
             self.cellsim(cellindex)
+            sys.stdout.flush()
 
         COMM.Barrier()
 
