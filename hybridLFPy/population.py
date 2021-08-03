@@ -1751,6 +1751,20 @@ class TopoPopulation(Population):
         """
         if RANK == 0:
             pop_soma_pos = self.draw_rand_pos(**self.populationParams)
+            # save the somatic placements:
+            pop_soma_pos_format = np.zeros((self.POPULATION_SIZE, 3))
+            keys = ['x', 'y', 'z']
+            for i in range(self.POPULATION_SIZE):
+                for j in range(3):
+                    pop_soma_pos_format[i, j] = pop_soma_pos[i][keys[j]]
+            fname = os.path.join(
+                self.populations_path,
+                self.output_file.format(
+                    self.y,
+                    'somapos.gdf'))
+            np.savetxt(fname, pop_soma_pos_format)
+            assert (os.path.isfile(fname))
+            print('save somapos ok')
         else:
             pop_soma_pos = None
         return COMM.bcast(pop_soma_pos, root=0)
