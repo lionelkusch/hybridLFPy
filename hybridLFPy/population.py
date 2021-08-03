@@ -405,6 +405,20 @@ class PopulationSuper(object):
             pop_soma_pos = self.draw_rand_pos(
                 # min_r = self.electrodeParams['r_z'],
                 **self.populationParams)
+            # save the somatic placements:
+            pop_soma_pos_format = np.zeros((self.POPULATION_SIZE, 3))
+            keys = ['x', 'y', 'z']
+            for i in range(self.POPULATION_SIZE):
+                for j in range(3):
+                    pop_soma_pos_format[i, j] = pop_soma_pos[i][keys[j]]
+            fname = os.path.join(
+                self.populations_path,
+                self.output_file.format(
+                    self.y,
+                    'somapos.gdf'))
+            np.savetxt(fname, pop_soma_pos_format)
+            assert (os.path.isfile(fname))
+            print('save somapos ok')
         else:
             pop_soma_pos = None
 
@@ -442,6 +456,23 @@ class PopulationSuper(object):
                 for axis in self.rand_rot_axis:
                     defaultrot.update({axis: np.random.rand() * 2 * np.pi})
                 rotations.append(defaultrot)
+            # save rotations using hdf5
+            fname = os.path.join(
+                self.populations_path,
+                self.output_file.format(
+                    self.y,
+                    'rotations.h5'))
+            f = h5py.File(fname, 'w')
+            f.create_dataset('x', (len(rotations),))
+            f.create_dataset('y', (len(rotations),))
+            f.create_dataset('z', (len(rotations),))
+
+            for i, rot in enumerate(rotations):
+                for key, value in list(rot.items()):
+                    f[key][i] = value
+            f.close()
+            assert(os.path.isfile(fname))
+            print('save rotations ok')
         else:
             rotations = None
 
@@ -783,40 +814,6 @@ class PopulationSuper(object):
                 f.close()
                 print('save {} ok'.format(measure))
 
-        if RANK == 0:
-            # save the somatic placements:
-            pop_soma_pos = np.zeros((self.POPULATION_SIZE, 3))
-            keys = ['x', 'y', 'z']
-            for i in range(self.POPULATION_SIZE):
-                for j in range(3):
-                    pop_soma_pos[i, j] = self.pop_soma_pos[i][keys[j]]
-            fname = os.path.join(
-                self.populations_path,
-                self.output_file.format(
-                    self.y,
-                    'somapos.gdf'))
-            np.savetxt(fname, pop_soma_pos)
-            assert(os.path.isfile(fname))
-            print('save somapos ok')
-
-        if RANK == 0:
-            # save rotations using hdf5
-            fname = os.path.join(
-                self.populations_path,
-                self.output_file.format(
-                    self.y,
-                    'rotations.h5'))
-            f = h5py.File(fname, 'w')
-            f.create_dataset('x', (len(self.rotations),))
-            f.create_dataset('y', (len(self.rotations),))
-            f.create_dataset('z', (len(self.rotations),))
-
-            for i, rot in enumerate(self.rotations):
-                for key, value in list(rot.items()):
-                    f[key][i] = value
-            f.close()
-            assert(os.path.isfile(fname))
-            print('save rotations ok')
 
         # collect cell attributes in self.savelist
         for attr in self.savelist:
