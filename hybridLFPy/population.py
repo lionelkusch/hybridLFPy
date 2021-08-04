@@ -226,7 +226,7 @@ class PopulationSuper(object):
         self.output_file_rank_name = 'rank_{}_'+str(self.y)+'.h5'
         self.cell_name_group = 'cell_{}'
         self.output_file_rank = h5py.File(os.path.join(self.tmp_path,
-                                                       self.output_file_rank_name.format(RANK)), 'w')
+                                                       self.output_file_rank_name.format(RANK)), 'a')
 
         self.pop_soma_pos = self.set_pop_soma_pos()
         self.rotations = self.set_rotations()
@@ -344,6 +344,9 @@ class PopulationSuper(object):
         if return_just_cell:
             return cell
         else:
+            if self.cell_name_group.format(cellindex) in self.output_file_rank:
+                print('already compute')
+                return
             # set LFPykit.models instance cell attribute
             for probe in self.probes:
                 probe.cell = cell
@@ -1260,6 +1263,9 @@ class Population(PopulationSuper):
         if return_just_cell:
             return cell
         else:
+            if self.cell_name_group.format(cellindex) in self.output_file_rank:
+                print('already compute')
+                return
             self.insert_all_synapses(cellindex, cell)
 
             # set LFPykit.models instance cell attribute
